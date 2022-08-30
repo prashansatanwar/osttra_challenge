@@ -1,0 +1,93 @@
+module Main where
+
+import Daml.Script
+import DA.List
+
+type PendingId = ContractId Pending
+
+template Agreement
+  with
+    owner: Party
+    content: Text
+    signatories: [Party]
+  where 
+    signatory signatories 
+    ensure
+      unique signatories
+    
+    
+template Pending
+  with 
+    finalContract: Agreement
+    alreadySigned: [Party]
+  where
+    signatory alreadySigned
+    observer finalContract.signatories
+    ensure 
+      unique alreadySigned
+
+    let toSign = filter (`notElem` alreadySigned) finalContract.signatories
+
+    choice Sign : ContractId Pending 
+      with  
+        signer: Party
+      controller signer
+      do
+        assert (signer `elem` toSign)
+        create this with alreadySigned = signer :: alreadySigned
+
+    choice Finalize : ContractId Agreement
+      with 
+        signer: Party
+      controller signer 
+      do 
+        assert(sort alreadySigned == sort finalContract.signatories)
+        assertMsg "You need to be owner to Finalize!" (signer == finalContract.owner)
+        create finalContract
+
+
+setup : Script PendingId
+setup = script do
+
+  alice <- allocatePartyWithHint "Alice" (PartyIdHint "Alice")
+  bob <- allocatePartyWithHint "Bob" (PartyIdHint "Bob")
+  charlie <- allocatePartyWithHint "Charlie" (PartyIdHint "Charlie")
+  david <- allocatePartyWithHint "David" (PartyIdHint "David")
+
+  aliceId <- validateUserId "alice"
+  bobId <- validateUserId "bob"
+  charlieId <- validateUserId "charlie"
+  davidId <- validateUserId "david"
+  
+  createUser (User aliceId (Some alice)) [CanActAs alice]
+  createUser (User bobId (Some bob)) [CanActAs bob]
+  createUser (User charlieId (Some charlie)) [CanActAs charlie]
+  createUser (User davidId (Some david)) [CanActAs david]
+
+  let parties = [alice,bob,charlie,david]
+
+  let doc = "hello this is the text which needs to be approved"
+
+  let finalContract = Agreement with signatories = parties; content = doc, owner=alice
+
+  -- initialFailTest <- alice `submitMustFail` do
+  --   createCmd Pending with finalContract; alreadySigned = [alice, bob]
+  
+  alice `submit` do
+    createCmd Pending with finalContract; alreadySigned = [alice]
+
+
+  -- pending <- bob `submit` do
+  --   exerciseCmd pending Sign with signer = bob
+  -- pending <- charlie `submit` do
+  --   exerciseCmd pending Sign with signer = charlie
+  -- pending <- david `submit` do
+  --   exerciseCmd pending Sign with signer = david
+
+  -- pendingFailTest <- charlie `submitMustFail` do
+  --   exerciseCmd pending Sign with signer = charlie
+  -- charlie `submitMustFail` do
+  --   exerciseCmd pending Sign with signer = david
+
+  -- alice `submit` do
+  --   exerciseCmd pending Finalize with signer = alice

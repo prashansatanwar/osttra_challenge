@@ -1,0 +1,63 @@
+module Main where
+
+import Daml.Script
+
+type AssetId = ContractId Asset
+
+template Asset
+  with
+    issuer : Party
+    owner  : Party
+    name   : Text
+  where
+    ensure name /= ""
+    signatory issuer
+    observer owner
+    choice Give : AssetId
+      with
+        newOwner : Party
+      controller owner
+      do create this with
+           owner = newOwner
+
+setup : Script ()
+setup = script do
+-- user_setup_begin
+  alice <- allocatePartyWithHint "Alice" (PartyIdHint "Alice")
+  bob <- allocatePartyWithHint "Bob" (PartyIdHint "Bob")
+  aliceId <- validateUserId "alice"
+  bobId <- validateUserId "bob"
+  createUser (User aliceId (Some alice)) [CanActAs alice]
+  createUser (User bobId (Some bob)) [CanActAs bob]
+
+
+  charlie <- allocatePartyWithHint "Charlie" (PartyIdHint "Charlie")
+  charlieId <- validateUserId "charlie"
+  createUser (User charlieId (Some charlie)) [CanActAs charlie]
+-- user_setup_end
+
+  aliceTV <- submit alice do
+    createCmd Asset with
+      issuer = alice
+      owner = alice
+      name = "TV"
+      
+
+  bobTV <- submitMustFail bob do
+    exerciseCmd aliceTV Give with newOwner = bob 
+
+  bobTV <- submit alice do
+    exerciseCmd aliceTV Give with newOwner = bob
+
+  charlieTV <- submitMustFail alice do
+    exerciseCmd aliceTV Give with newOwner = charlie
+    
+
+  charlieTV <- submit bob do
+    exerciseCmd bobTV Give with newOwner = charlie
+
+  aliceTV <- submit charlie do
+    exerciseCmd charlieTV Give with newOwner = alice
+
+  submitMustFail bob do
+    exerciseCmd bobTV Give with newOwner = alice
